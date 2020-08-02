@@ -7,7 +7,7 @@
 
   <PropertyGroup>
     <PackageId>Qkmaxware.Media</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Authors>Colin Halseth</Authors>
     <PackageTags>media format exporters</PackageTags>
     <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
