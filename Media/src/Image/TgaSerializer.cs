@@ -38,9 +38,9 @@ public class TgaSerializer {
         for(int row = 0; row < size.Height; row++) {
             for(int column = 0; column < size.Width; column++){
                 Colour c = sampler.GetPixelColour(row, column);
-                writer.Write(c.R);
-                writer.Write(c.G);
                 writer.Write(c.B);
+                writer.Write(c.G);
+                writer.Write(c.R);
             }
         }
     }
