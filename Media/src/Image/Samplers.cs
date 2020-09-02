@@ -79,11 +79,11 @@ public class MatrixColourSampler : IColourSampler {
     /// <summary>
     /// Query the colour of the pixel at the given coordinates
     /// </summary>
-    /// <param name="x">the row</param>
-    /// <param name="y">the column</param>
+    /// <param name="row">the row</param>
+    /// <param name="column">the column</param>
     /// <returns>colour at the given row and column</returns>
-    public Colour GetPixelColour(int x, int y) {
-        return colours[x, y];
+    public Colour GetPixelColour(int row, int column) {
+        return colours[row, column];
     }
     /// <summary>
     /// Dimensions of the pixel space

@@ -21,21 +21,18 @@ public class Yuv4Mpeg2Serializer {
         // Y is luma
         // Cb is blue-difference
         // Cr is red-difference
+        float fr = (float)c.R / 255;
+        float fg = (float)c.G / 255;
+        float fb = (float)c.B / 255;
 
-        var r = c.R; var g = c.G; var b = c.B;
-
-        var m00 = 0.299; var m01 = 0.587; var m02 = 0.114;
-        var m10 =-0.169; var m11 =-0.331; var m12 = 0.500;
-        var m20 = 0.500; var m21 =-0.419; var m22 =-0.081;
-
-        var Y   = m00 * r + m01 * g + m02 * b + 0;
-        var Cb  = m10 * r + m11 * g + m12 * b + 128;
-        var Cr  = m20 * r + m21 * g + m22 * b + 128;
+        float Y = (float)(0.2989 * fr + 0.5866 * fg + 0.1145 * fb);
+        float Cb = (float)(-0.1687 * fr - 0.3313 * fg + 0.5000 * fb);
+        float Cr = (float)(0.5000 * fr - 0.4184 * fg - 0.0816 * fb);
 
         return (
-            Y: (byte)Y,
-            Cb: (byte)Cb,
-            Cr: (byte)Cr
+            Y: (byte)(Y * 255),
+            Cb: (byte)(Cb* 255),
+            Cr: (byte)(Cr* 255)
         ); 
     }
 
@@ -43,17 +40,17 @@ public class Yuv4Mpeg2Serializer {
     /// Return the colour of the image or black if the index is out of bounds
     /// </summary>
     /// <param name="sampler">colour sampler</param>
-    /// <param name="x">x coordinate</param>
+    /// <param name="row">x coordinate</param>
     /// <param name="y">y coordinate</param>
     /// <returns>colour from sampler or black</returns>
-    private Colour ColorOrDefault(IColourSampler sampler, int x, int y) {
+    private Colour ColorOrDefault(IColourSampler sampler, int row, int column) {
         var size = sampler.GetSize();
-        if (x < 0 || x >= size.Width) {
+        if (row < 0 || row >= size.Height) {
             return Colour.Black;
-        } else if (y < 0 || y >= size.Height) {
+        } else if (column < 0 || column >= size.Width) {
             return Colour.Black;
         } else {
-            return sampler.GetPixelColour(x, y);
+            return sampler.GetPixelColour(row, column);
         }
     }
 
@@ -71,29 +68,48 @@ public class Yuv4Mpeg2Serializer {
         // Write header
         writer.Write("YUV4MPEG2 ".ToCharArray());
         writer.Write('W'); writer.Write(width.ToString().ToCharArray());
-        writer.Write(0x20); writer.Write('H'); writer.Write(height.ToString().ToCharArray());
-        writer.Write(0x20); writer.Write('F'); writer.Write(frameRate.ToString().ToCharArray()); writer.Write(':'); writer.Write('1');
+        writer.Write((char)0x20); writer.Write('H'); writer.Write(height.ToString().ToCharArray());
+        writer.Write((char)0x20); writer.Write('F'); writer.Write(frameRate.ToString().ToCharArray()); writer.Write(':'); writer.Write('1');
         //writer.Write(0x20); writer.Write("Ip".ToCharArray()); // progressive interlacing
-        writer.Write(0x20); writer.Write("A1:1".ToCharArray()); // square pixels
-        writer.Write(0x20); writer.Write("C444".ToCharArray());
-        writer.Write(0x0A);
+        writer.Write((char)0x20); writer.Write("A1:1".ToCharArray()); // square pixels
+        writer.Write((char)0x20); writer.Write("C444".ToCharArray());
+        writer.Write((char)0x0A);
+        writer.Flush(); // Flush after header
 
         // Write frame(s)
         foreach (var frame in frames) {
             writer.Write("FRAME".ToCharArray());
+            writer.Write((char)0x0A);
 
-            for (var row = 0; row < width; row++) {
-                for (var column = 0; column < height; column++) {
-                    var colour = ColorOrDefault(frame, column, row);
-                    var (Y, Cb, Cr) = ConvertToYCbCr(colour);
+            // Write Y frame
+            for (var row = 0; row < height; row++) {
+                for (var column = 0; column < width; column++) {
+                    var colour = ColorOrDefault(frame, row, column); // height is the first dimension, width the second
+                    var Y = (byte)((colour.R * 77f/256f + colour.G * 150f/256f + colour.B * 29f/256f));
 
                     writer.Write(Y);
-                    writer.Write(Cb);
-                    writer.Write(Cr);
                 }
             }
+            // Write U frame
+            for (var row = 0; row < height; row++) {
+                for (var column = 0; column < width; column++) {
+                    var colour = ColorOrDefault(frame, row, column); // height is the first dimension, width the second
+                    var U = (byte)((colour.R * -43f/256f + colour.G * -84f/256f + colour.B * 127f/256f + 128));
 
-            writer.Write(0x0A);
+                    writer.Write(U);
+                }
+            }
+            // Write V frame
+            for (var row = 0; row < height; row++) {
+                for (var column = 0; column < width; column++) {
+                    var colour = ColorOrDefault(frame, row, column); // height is the first dimension, width the second
+                    var V = (byte)(colour.R * 127f/256f + colour.G * -106f/256f + colour.B * -21f/256f + 128);
+
+                    writer.Write(V);
+                }
+            }
+            //writer.Write((char)0x0A);
+            writer.Flush(); // Flush after frame
         }
     }
 
