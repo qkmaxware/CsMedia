@@ -9,18 +9,20 @@ namespace Qkmaxware.Media.Test.Image {
 [TestClass]
 public class TiffTest {
 
+    private static string testPathRoot = Path.GetFullPath(Path.Combine(System.Environment.CurrentDirectory, "..", "..", ".."));
+
     [TestMethod]
     public void TestSaveLoad() {
         var format = new TagImageFileFormat();
-        var filename = Path.Combine("raw", "Test.tif");
-        var image = format.Load(filename);
+        var filename = "Test.tif";
+        var image = format.Load(Path.Combine(testPathRoot, "raw", filename));
 
         Assert.AreEqual(SampleDepth.Bit8, image.SampleBitDepth);
         Assert.AreEqual(64, image.Width);
         Assert.AreEqual(64, image.Height);
 
-        Directory.CreateDirectory("processed");
-        format.Save(Path.Join("processed", filename), image);
+        Directory.CreateDirectory(Path.Combine(testPathRoot,"processed"));
+        format.Save(Path.Join(testPathRoot, "processed", filename), image);
     }
 
 }

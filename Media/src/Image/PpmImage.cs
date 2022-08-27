@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text;
 
 namespace Qkmaxware.Media.Image;
 
@@ -244,9 +245,9 @@ public class PortablePixelMapFormat : IAsciiImageLoader, IBinaryImageLoader, IAs
         }
 
         // Header
-        writer.Write('P'); writer.Write('6'); writer.Write(' ');
-        writer.Write(width.ToString()); writer.Write(' '); writer.Write(height.ToString()); writer.Write(' ');
-        writer.Write(maxSampleValue.ToString()); writer.Write('\n');
+        writer.Write('P'); writer.Write('6'); writer.Write('\n');
+        writer.Write(Encoding.ASCII.GetBytes(width.ToString())); writer.Write(' '); writer.Write(Encoding.ASCII.GetBytes(height.ToString())); writer.Write('\n');
+        writer.Write(Encoding.ASCII.GetBytes(maxSampleValue.ToString())); writer.Write('\n');
 
         // Body
         for(int row = 0; row < height; row++) {
