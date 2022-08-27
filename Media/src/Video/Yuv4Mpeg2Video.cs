@@ -8,9 +8,9 @@ using Qkmaxware.Media.Image;
 namespace Qkmaxware.Media.Video {
 
 /// <summary>
-/// Serializer to create YUV4MPEG2 video files
+/// File format for YUV4MPEG2 video files
 /// </summary>
-public class Yuv4Mpeg2Serializer {
+public class Yuv4Mpeg2Format : IBinaryVideoEncoder {
 
     /// <summary>
     /// Convert RGB colours to YCbCr colour space
@@ -43,14 +43,34 @@ public class Yuv4Mpeg2Serializer {
     /// <param name="row">x coordinate</param>
     /// <param name="y">y coordinate</param>
     /// <returns>colour from sampler or black</returns>
-    private Colour ColorOrDefault(IColourSampler sampler, int row, int column) {
-        var size = sampler.GetSize();
-        if (row < 0 || row >= size.Height) {
+    private Colour ColorOrDefault(IImage sampler, int row, int column) {
+        var width = sampler.Width;
+        var height = sampler.Height;
+        if (row < 0 || row >= height) {
             return Colour.Black;
-        } else if (column < 0 || column >= size.Width) {
+        } else if (column < 0 || column >= width) {
             return Colour.Black;
         } else {
-            return sampler.GetPixelColour(row, column);
+            var pixel = sampler.Pixels?[row, column];
+            if (pixel == null)
+                return Colour.Black;
+            else {
+                return Colour.FromArgb(0, (byte)pixel.Red, (byte)pixel.Green, (byte)pixel.Blue);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Save a video to the given file path
+    /// </summary>
+    /// <param name="path">path to file</param>
+    /// <param name="frames">frames</param>
+    public void Save(string path, IVideo frames) {
+        if (!path.EndsWith(".y4m"))
+            path += ".y4m";
+        using (var fs = new FileStream(path, FileMode.Create))
+        using (var writer = new BinaryWriter(fs)) {
+            SaveTo(writer, frames);
         }
     }
 
@@ -60,10 +80,10 @@ public class Yuv4Mpeg2Serializer {
     /// <param name="writer">writer to write to</param>
     /// <param name="frames">video frames</param>
     /// <param name="framesPerSecond">playback speed in frames per second</param>
-    public void Serialize(BinaryWriter writer, IEnumerable<IColourSampler> frames, int framesPerSecond = 24) {
-        var width = frames.Select(sampler => sampler.GetSize().Width).Max();
-        var height = frames.Select(sampler => sampler.GetSize().Height).Max();
-        var frameRate = Math.Max(framesPerSecond, 0);
+    public void SaveTo(BinaryWriter writer, IVideo frames) {
+        var width = frames.Width; 
+        var height = frames.Height;
+        var frameRate = Math.Max(frames.FramesPerSecond, 0);
 
         // Write header
         writer.Write("YUV4MPEG2 ".ToCharArray());

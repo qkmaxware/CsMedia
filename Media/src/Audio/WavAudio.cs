@@ -2,7 +2,10 @@ using System.IO;
 
 namespace Qkmaxware.Media.Audio {
 
-public class WavSerializer {
+/// <summary>
+/// Waveform audio format
+/// </summary>
+public class WaveformFormat : IBinaryAudioEncoder {
     /// <summary>
     /// MIME type
     /// </summary>
@@ -17,11 +20,25 @@ public class WavSerializer {
     }
 
     /// <summary>
+    /// Encode a waveform to a file at the given path
+    /// </summary>
+    /// <param name="path">path to file</param>
+    /// <param name="sampler">waveform to encode</param>
+    public void Save(string path, IWaveformSampler sampler) {
+        if (!path.EndsWith(".wav"))
+            path += ".wav";
+        using (var fs = new FileStream(path, FileMode.Create))
+        using (var writer = new BinaryWriter(fs)) {
+            SaveTo(writer, sampler);
+        }
+    }
+
+    /// <summary>
     /// Convert a waveform into WAV file format
     /// </summary>
     /// <param name="writer">writer to write to</param>
     /// <param name="sampler">waveform to sample</param>
-    public void Serialize (BinaryWriter writer, IWaveformSampler sampler) {
+    public void SaveTo (BinaryWriter writer, IWaveformSampler sampler) {
         // Basic info
         uint sampleCount = 44100;
         ushort channelCount = 1;

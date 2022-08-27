@@ -5,14 +5,14 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Qkmaxware.Media.Image;
 using Qkmaxware.Media.Video;
 
-namespace Qkmaxware.Media.Test {
+namespace Qkmaxware.Media.Test.Video {
 
 [TestClass]
 public class Yuv4MpegSerializerTest {
     [TestMethod]
     public void TestSerialization() {
         // Create animation
-        List<IColourSampler> frames = new List<IColourSampler>();  
+        List<IImage> frames = new List<IImage>();  
         var length = 48; 
         for (var i = 0; i <= length; i++) {
             var percent = ((i)/(double)length);
@@ -29,14 +29,16 @@ public class Yuv4MpegSerializerTest {
                 image[480/2 - 1,    j] = Color.Red;
                 image[480/2 + 1,    j] = Color.Red;
             }
-            frames.Add(image.GetSampler());
+            frames.Add(new MemoryImage(image));
         }
+        var video = new MemoryVideo(frames);
 
         // Serialize
-        var serializer = new Yuv4Mpeg2Serializer();
-        Directory.CreateDirectory("data");
-        using (var writer = new BinaryWriter(File.Open(Path.Combine("data", "movie.y4m"), FileMode.Create))) {
-            serializer.Serialize(writer, frames, framesPerSecond: 24);
+        var serializer = new Yuv4Mpeg2Format();
+        Directory.CreateDirectory("processed");
+        using (var writer = new BinaryWriter(File.Open(Path.Combine("processed", "movie.y4m"), FileMode.Create))) {
+
+            serializer.SaveTo(writer, video);
         }
     }   
 }

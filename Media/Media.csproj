@@ -1,13 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <LangVersion>8.0</LangVersion>
+    <LangVersion>10.0</LangVersion>
     <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <PropertyGroup>
     <PackageId>Qkmaxware.Media</PackageId>
-    <Version>1.0.2</Version>
+    <Version>2.0.0</Version>
     <Authors>Colin Halseth</Authors>
     <PackageTags>media format exporters</PackageTags>
     <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
