@@ -450,6 +450,7 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
 
         // Copy all user defined metadata
         TiffMetadata metadata = new TiffMetadata();
+        List<TiffField> orderedFields = new List<TiffField>();
         foreach (var field in image.Metadata) {
             // Handle encoding of metadata
             convertMediaMetadataToTiffMetadata(metadata, field);
@@ -460,53 +461,51 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
             var IFDWriter = new BinaryWriter(IFD);
 
             // Primary IFD
-            List<TiffField> fields = new List<TiffField>();
             List<long> valueFieldOffsets = new List<long>();
             var sampleSize = (int)image.SampleBitDepth;
             var samples = image.Pixels?[0,0]?.Samples?.Length ?? 0;
             if (samples < 3)
                 samples = 3;
             var numBytesPerStrip = (sampleSize / 8) /* 16 bits per sample */ * samples * image.Width;
-            var stripOffsetFieldIdx = 0;
             {
                 // Create fields
-                fields.Add(new TiffField{  
+                metadata.Add(new TiffField{  
                     TagId = (uint)ExifTag.ImageWidth,
                     DataType = TiffFieldType.Short,
                     Length = 1,
                     ValueOffset = image.Width,
                 });
-                fields.Add(new TiffField{  
+                metadata.Add(new TiffField{  
                     TagId = (uint)ExifTag.ImageHeight,
                     DataType = TiffFieldType.Short,
                     Length = 1,
                     ValueOffset = image.Height,
                 });
-                fields.Add(new TiffField{  
+                metadata.Add(new TiffField{  
                     TagId = (uint)ExifTag.Compression,
                     DataType = TiffFieldType.Short,
                     Length = 1,
                     ValueOffset = 1, // No compression
                 });
-                fields.Add(new TiffField{  
+                metadata.Add(new TiffField{  
                     TagId = (uint)ExifTag.PhotometricInterpretation,
                     DataType = TiffFieldType.Short,
                     Length = 1,
                     ValueOffset = 2, // FULL RGB images with at least 3 samples per pixel
                 });
-                fields.Add(new TiffField{  
+                metadata.Add(new TiffField{  
                     TagId = (uint)ExifTag.ResolutionUnit,
                     DataType = TiffFieldType.Short,
                     Length = 1,
                     ValueOffset = 1, // No absolute unit of measurement
                 });
-                fields.Add(new TiffField{  
+                metadata.Add(new TiffField{  
                     TagId = (uint)ExifTag.XResolution,
                     DataType = TiffFieldType.Short,
                     Length = 1,
                     ValueOffset = 1, // 1 pixel per unit
                 });
-                fields.Add(new TiffField{  
+                metadata.Add(new TiffField{  
                     TagId = (uint)ExifTag.YResolution,
                     DataType = TiffFieldType.Short,
                     Length = 1,
@@ -514,7 +513,7 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                 });
                 {
                     // Samples
-                    fields.Add(new TiffField{  
+                    metadata.Add(new TiffField{  
                         TagId = (uint)ExifTag.SamplesPerPixel,
                         DataType = TiffFieldType.Short,
                         Length = 1,
@@ -524,14 +523,14 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                     for (var i = 0; i < samples; i++) {
                         bits[i] = sampleSize; // All samples are 16bit in this export
                     }
-                    fields.Add(new TiffField{  
+                    metadata.Add(new TiffField{  
                         TagId = (uint)ExifTag.BitsPerSample,
                         DataType = TiffFieldType.Short,
                         Length = (uint)bits.Length,
                         Values = bits,
                     });
                     if (samples > 3) {
-                        fields.Add(new TiffField{
+                        metadata.Add(new TiffField{
                             TagId = (uint)ExifTag.ExtraSamples,
                             DataType = TiffFieldType.Short,
                             Length = 1,
@@ -541,18 +540,17 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                 }
                 {
                     // Encoded image data
-                    fields.Add(new TiffField{  
+                    metadata.Add(new TiffField{  
                         TagId = (uint)ExifTag.RowsPerStrip, // How many rows of pixels exist per strip
                         DataType = TiffFieldType.Short,
                         Length = 1,
                         ValueOffset = 1, // Each strip is its own row
                     });
-                    stripOffsetFieldIdx = fields.Count;
                     var stripOffsetDefaults = new object[image.Height];
                     for (var i = 0; i < stripOffsetDefaults.Length; i++) {
                         stripOffsetDefaults[i] = default(uint);
                     }
-                    fields.Add(new TiffField{  
+                    metadata.Add(new TiffField{  
                         TagId = (uint)ExifTag.StripOffsets, // Where are the strips located... I do know the number of strips though
                         DataType = TiffFieldType.Long,
                         Length = (uint)image.Height,
@@ -562,7 +560,7 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                     for (var i = 0; i < bytesPerStrip.Length; i++) {
                         bytesPerStrip[i] = numBytesPerStrip; 
                     }
-                    fields.Add(new TiffField{  
+                    metadata.Add(new TiffField{  
                         TagId = (uint)ExifTag.StripByteCounts, // How many bytes per strip, 
                         DataType = TiffFieldType.Short,
                         Length = (uint)bytesPerStrip.Length,
@@ -571,9 +569,9 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                 }
 
                 // Write IFD
-                metadata.Add(fields);
-                IFDWriter.Write((ushort)metadata.Count); // Number of IFD entries
-                foreach (var field in metadata) {
+                orderedFields = metadata.OrderBy(field => field.TagId).ToList();
+                IFDWriter.Write((ushort)orderedFields.Count); // Number of IFD entries
+                foreach (var field in orderedFields) {
                     IFDWriter.Write((ushort)field.TagId);
                     IFDWriter.Write((ushort)field.DataType);
                     IFDWriter.Write((uint)field.Length);
@@ -586,8 +584,8 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
             {
                 // IFD array data
                 var inMemoryOffsetPtr = 0L;
-                for (var i = 0; i < fields.Count; i++) {
-                    var field = fields[i];
+                for (var i = 0; i < orderedFields.Count; i++) {
+                    var field = orderedFields[i];
                     var valueOffsetPtr = valueFieldOffsets[i];
                     if (field.Length > 1 && field.Values != null) {
                         // Write the array of values based on the data type
