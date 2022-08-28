@@ -10,6 +10,9 @@ public interface IImage {
     public int Width {get;}
     public int Height {get;}
 
+    // Metadata
+    public Metadata.MetadataContainer Metadata {get;}
+
     // Data
     public SampleDepth SampleBitDepth {get;}
     public Pixel[,]? Pixels {get;}
@@ -21,6 +24,8 @@ public interface IImage {
 public class MemoryImage : IImage {
     public Pixel[,] Pixels {get; private set;}
 
+    public Metadata.MetadataContainer Metadata {get; private set;} = new Metadata.MetadataContainer();
+
     public int Width => Pixels.GetLength(1);
     public int Height => Pixels.GetLength(0);
 
@@ -29,6 +34,11 @@ public class MemoryImage : IImage {
     public MemoryImage (SampleDepth depth, int width, int height) {
         this.SampleBitDepth = depth;
         this.Pixels = new Pixel[height,width];
+    }
+
+    public MemoryImage(SampleDepth depth, Pixel[,] pixels) {
+        this.SampleBitDepth = depth;
+        this.Pixels = pixels;
     }
 
     public MemoryImage (Color[,] colours) : this(SampleDepth.Bit8, colours.GetLength(1), colours.GetLength(0)) {

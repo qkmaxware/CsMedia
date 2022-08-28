@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using static Qkmaxware.Media.Image.TiffImage;
+using Qkmaxware.Media.Image.Metadata;
 
 namespace Qkmaxware.Media.Image;
 
@@ -19,7 +19,7 @@ public class TiffEncoderException : System.Exception {
 /// <summary>
 /// Field data type used by TIFF images
 /// </summary>
-public enum TiffFieldType : uint {
+internal enum TiffFieldType : uint {
     Byte = 1,           // 8 bit unsigned int
     ASCII = 2,          // 8 bit ascii code
     Short = 3,          // 16 bit unsigned int
@@ -43,18 +43,18 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
     private static char readAscii(ByteIterator reader) => Convert.ToChar(reader.ReadU8());
     private static uint readU16(ByteIterator reader) => reader.ReadU16();
     private static uint readU32(ByteIterator reader) => reader.ReadU32();
-    private static double readURational(ByteIterator reader) {
+    private static UnsignedRational readURational(ByteIterator reader) {
         var num = readU32(reader);
         var dem = readU32(reader);
-        return (double)num/(double)dem;
+        return new UnsignedRational(num, dem);
     }
     private static int readS8(ByteIterator reader) => reader.ReadS8();
     private static int readS16(ByteIterator reader) => reader.ReadS16();
     private static int readS32(ByteIterator reader) => reader.ReadS32();
-    private static double readSRational(ByteIterator reader) {
+    private static SignedRational readSRational(ByteIterator reader) {
         var num = readS32(reader);
         var dem = readS32(reader);
-        return (double)num/(double)dem;
+        return new SignedRational(num, dem);
     }
     private static float readIEEEFloat(ByteIterator reader) => reader.ReadIEEEFloat();
     private static double readIEEEDouble(ByteIterator reader) => reader.ReadIEEEDouble();
@@ -92,13 +92,13 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
 
         // Read first IFD (BASELINE TIFF NOT REQUIRED TO READ MORE THAN 1 IFD)
         reader.BaseStream.Seek(IFDptr, SeekOrigin.Begin);
-        TiffImage img = new TiffImage();
         var IFDsize = readU16(byteReader);
         if (IFDsize < 1) {
             throw new TiffDecoderException("TIFF IFD must contain at least 1 entry");
         }
 
         // Read all IFD entries
+        TiffMetadata metadata = new TiffMetadata();
         for (var i = 0; i < IFDsize; i++) {
             var tag = readU16(byteReader);                    // The tag that identifies the field
             var typeVal = readU16(byteReader);                // The field type
@@ -107,10 +107,9 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
 
             if (Enum.IsDefined(typeof(TiffFieldType), typeVal)) {
                 //var fitsIn4Bytes = TiffFieldType.ByteSize() * count;
-                var type = (TiffFieldType)typeVal;
-                img.Metadata.Add(new TiffImage.TiffField { 
+                metadata.Add(new TiffField { 
                     TagId = tag,
-                    DataType = type, 
+                    DataType = (TiffFieldType)typeVal, 
                     Length = count, 
                     ValueOffset = offset // If this is smaller than 4 bytes it is a value? Otherwise its an offset?
                 });
@@ -124,10 +123,26 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
         var nextIFDptr = readU32(byteReader); // For potential future work (baseTiff doesn't need this as we only are required to read 1 image)
         
         // Read in all the data arrays for each IFD entry
-        foreach (var meta in img.Metadata) {
+        foreach (var meta in metadata) {
             if (meta.ValueOffset < 0xFFFFFFFF && meta.Length == 1) {
                 // Offset is value, interpret it as such
-                meta.Values = new object[1] { meta.ValueOffset };
+                meta.Values = new object[1] { 
+                    meta.DataType switch {
+                        TiffFieldType.Byte              => (byte)meta.ValueOffset,
+                        TiffFieldType.ASCII             => System.Text.Encoding.UTF8.GetString(BitConverter.GetBytes(meta.ValueOffset)),
+                        TiffFieldType.Short             => (ushort)meta.ValueOffset,
+                        TiffFieldType.Long              => (uint)meta.ValueOffset,
+                        TiffFieldType.Rational          => new UnsignedRational((uint)meta.ValueOffset, 1),
+                        TiffFieldType.SignedByte        => (sbyte)meta.ValueOffset,
+                        TiffFieldType.Undefined         => (byte)meta.ValueOffset,
+                        TiffFieldType.SignedShort       => (short)meta.ValueOffset,
+                        TiffFieldType.SignedLong        => (int)meta.ValueOffset,
+                        TiffFieldType.SignedRational    => new SignedRational((int)meta.ValueOffset, 1),
+                        TiffFieldType.Float             => BitConverter.ToSingle(BitConverter.GetBytes(meta.ValueOffset), 0),
+                        TiffFieldType.Double            => BitConverter.ToDouble(BitConverter.GetBytes(meta.ValueOffset), 0),
+                        _ => meta.ValueOffset
+                    }
+                };
                 continue;
             }
             // Offset is an actual position in the file, location of the data
@@ -136,18 +151,18 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
             var data = new object[meta.Length];
             for (var i = 0; i < data.Length; i++) {
                 data[i] = meta.DataType switch {
-                    TiffFieldType.Byte => readU8(byteReader),
-                    TiffFieldType.ASCII => readAscii(byteReader),
-                    TiffFieldType.Short => readU16(byteReader),
-                    TiffFieldType.Long => readU32(byteReader),
-                    TiffFieldType.Rational => readURational(byteReader),
-                    TiffFieldType.SignedByte => readS8(byteReader),
-                    TiffFieldType.Undefined => readU8(byteReader),
-                    TiffFieldType.SignedShort => readS16(byteReader),
-                    TiffFieldType.SignedLong => readS32(byteReader),
-                    TiffFieldType.SignedRational => readSRational(byteReader),
-                    TiffFieldType.Float => readIEEEFloat(byteReader),
-                    TiffFieldType.Double => readIEEEDouble(byteReader),
+                    TiffFieldType.Byte              => readU8(byteReader),
+                    TiffFieldType.ASCII             => readAscii(byteReader),
+                    TiffFieldType.Short             => readU16(byteReader),
+                    TiffFieldType.Long              => readU32(byteReader),
+                    TiffFieldType.Rational          => readURational(byteReader),
+                    TiffFieldType.SignedByte        => readS8(byteReader),
+                    TiffFieldType.Undefined         => readU8(byteReader),
+                    TiffFieldType.SignedShort       => readS16(byteReader),
+                    TiffFieldType.SignedLong        => readS32(byteReader),
+                    TiffFieldType.SignedRational    => readSRational(byteReader),
+                    TiffFieldType.Float             => readIEEEFloat(byteReader),
+                    TiffFieldType.Double            => readIEEEDouble(byteReader),
                     _ => 0
                 };
             }
@@ -155,26 +170,46 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
         }
 
         // Final checks
-         if (!img.Metadata.Contains(ExifTag.PhotometricInterpretation))
+         if (!metadata.Contains(ExifTag.PhotometricInterpretation))
             throw new TiffDecoderException("Missing image photometric interpretation metadata");
-        if (!img.Metadata.Contains(ExifTag.ImageWidth))
+        if (!metadata.Contains(ExifTag.ImageWidth))
             throw new TiffDecoderException("Missing image width metadata");
-        if (!img.Metadata.Contains(ExifTag.ImageLength))
+        if (!metadata.Contains(ExifTag.ImageHeight))
             throw new TiffDecoderException("Missing image length metadata");
-        if (!img.Metadata.Contains(ExifTag.RowsPerStrip))
+        if (!metadata.Contains(ExifTag.RowsPerStrip))
             throw new TiffDecoderException("Missing rows per strip metadata");
-        if (!img.Metadata.Contains(ExifTag.StripByteCounts))
+        if (!metadata.Contains(ExifTag.StripByteCounts))
             throw new TiffDecoderException("Missing strip byte counts metadata");
-        if (!img.Metadata.Contains(ExifTag.StripOffsets))
+        if (!metadata.Contains(ExifTag.StripOffsets))
             throw new TiffDecoderException("Missing strip offsets metadata");
 
+        // Obtain important metadata for further steps
+        var samples = (metadata.Contains(ExifTag.BitsPerSample) ? metadata[ExifTag.BitsPerSample].Values : new object[]{ 8 }).Select(x => Convert.ToInt32(x)).ToArray();
+        var maxSampleDepth = samples.Max();
+        var type = getType(metadata);
+        var compression = getCompression(metadata);
+        var numSamplesPerPixel = samples.Length;
+        bool interleaveSamples = metadata.Contains(ExifTag.PlanarConfiguration) ? Convert.ToInt32(metadata[ExifTag.PlanarConfiguration].Values[0]) == 1 : true /*default true*/; // 2='Planar' for per channel and 1='Chunky' for interleaved;
+        var photoMode = metadata[ExifTag.PhotometricInterpretation];
+        bool useColourPalette = photoMode.Values != null && photoMode.Values.Length > 0 && Convert.ToInt32(photoMode.Values[0]) == 3 && metadata.Contains(ExifTag.ColorMap);
+
+        // Create the image
+        var img = new MemoryImage(
+            maxSampleDepth switch {
+                8 => SampleDepth.Bit8,
+                16 => SampleDepth.Bit16,
+                32 => SampleDepth.Bit32,
+                _ => throw new TiffDecoderException($"Images with {maxSampleDepth}bit samples are not currently supported")
+            },
+            createPixels(metadata, useColourPalette, numSamplesPerPixel)
+        );
+
         // Read image data from strips (uncompress if required)
-        var photoMode = img.Metadata[ExifTag.PhotometricInterpretation];
         ByteIterator? imageBits = null;
         {
-            var offsetField = img.Metadata[ExifTag.StripOffsets]; 
-            var bytesField = img.Metadata[ExifTag.StripByteCounts];
-            var rowsPerStripField = img.Metadata[ExifTag.RowsPerStrip];
+            var offsetField = metadata[ExifTag.StripOffsets]; 
+            var bytesField = metadata[ExifTag.StripByteCounts];
+            var rowsPerStripField = metadata[ExifTag.RowsPerStrip];
 
             var stripCount = offsetField.Length;
             var strips = new List<byte[]>((int)stripCount);
@@ -192,7 +227,7 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                 strips.Add(bytes);
             }
             // Decode strips as pixel bytes
-            switch (img.CompressionType) {
+            switch (compression) {
                 case TiffCompression.NoCompression:
                     imageBits = decodeDataNoCompression(order, img.Width, img.Height, Convert.ToInt32(rowsPerStripField.Values[0]), strips);
                     break;
@@ -204,30 +239,12 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                     //break;
             }
         }
+        
         // Convert the decoded bytes to pixels
-        var samples = (img.Metadata.Contains(ExifTag.BitsPerSample) ? img.Metadata[ExifTag.BitsPerSample].Values : new object[]{ 8 }).Select(x => Convert.ToInt32(x)).ToArray();
-        var maxSampleDepth = samples.Max();
-        img.SampleBitDepth = maxSampleDepth switch {
-            8 => SampleDepth.Bit8,
-            16 => SampleDepth.Bit16,
-            32 => SampleDepth.Bit32,
-            _ => throw new TiffDecoderException($"Images with {maxSampleDepth}bit samples are not currently supported")
-        };
-        var numSamplesPerPixel = samples.Length;
-        bool interleaveSamples = img.Metadata.Contains(ExifTag.PlanarConfiguration) ? Convert.ToInt32(img.Metadata[ExifTag.PlanarConfiguration].Values[0]) == 1 : true /*default true*/; // 2='Planar' for per channel and 1='Chunky' for interleaved;
-        bool useColourPalette = photoMode.Values != null && photoMode.Values.Length > 0 && Convert.ToInt32(photoMode.Values[0]) == 3 && img.Metadata.Contains(ExifTag.ColourMap);
-        if (imageBits != null) {
-            var type = img.Type;
-            img.Pixels = new Pixel[img.Height,img.Width];
-            for (var i = 0L; i < img.Pixels.GetLongLength(0); i++) {
-                for (var j = 0L; j < img.Pixels.GetLongLength(1); j++) {
-                    img.Pixels[i,j] = new Pixel(useColourPalette ? 3 : numSamplesPerPixel);
-                }
-            }
-            
+        if (imageBits != null) {     
             // COLOUR PALETTE BASED TIFF IMAGES (always PER CHANNEL, use colour palatte instead of byte array) 
             if (useColourPalette) {
-                var palatte = img.Metadata[ExifTag.ColourMap];
+                var palatte = metadata[ExifTag.ColorMap];
                 var depth = samples[0];
                 for (var row = 0L; row < img.Pixels.GetLongLength(0); row++) {
                     for (var col = 0L; col < img.Pixels.GetLongLength(1); col++) {
@@ -300,6 +317,10 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                 }
             }
         }
+
+        // Convert from extracted TIFF metadata to image metadata
+        convertTiffMetadataToMediaMetadata(img, metadata);
+
         // Return the image
         return img;
     }
@@ -313,6 +334,92 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
         return new ByteIterator(order, bytes.ToArray());
     }
 
+    private TiffImageType getType(TiffMetadata metadata) {
+        var tag = ExifTag.PhotometricInterpretation;
+        if (!metadata.Contains(tag))
+            return TiffImageType.WhiteIsZero;
+        
+        var field = metadata[tag];
+        if (field.Values == null || field.Values.Length < 1) {
+            return TiffImageType.WhiteIsZero;
+        }
+
+        var ivalue = (int)Convert.ToInt32(field.Values[0]);
+        if (Enum.IsDefined(typeof(TiffImageType), ivalue)) {
+            return (TiffImageType)ivalue;
+        } else {
+            return TiffImageType.WhiteIsZero;
+        }
+    }
+
+    private TiffCompression getCompression(TiffMetadata metadata) {
+        var tag = ExifTag.Compression;
+        if (!metadata.Contains(tag))
+            return TiffCompression.NoCompression;
+        
+        var field = metadata[tag];
+        if (field.Values == null || field.Values.Length < 1) {
+            return TiffCompression.NoCompression;
+        }
+
+        var ivalue = (int)Convert.ToInt32(field.Values[0]);
+        if (Enum.IsDefined(typeof(TiffCompression), ivalue)) {
+            return (TiffCompression)ivalue;
+        } else {
+            return TiffCompression.NoCompression;
+        }   
+    }
+
+    private Pixel[,] createPixels(TiffMetadata metadata, bool isUsingColourPalette, int samples) {
+        var Width = Convert.ToInt32(metadata[ExifTag.ImageWidth].Values[0]);
+        var Height = Convert.ToInt32(metadata[ExifTag.ImageHeight].Values[0]);
+
+        var Pixels = new Pixel[Height,Width];
+        for (var i = 0L; i < Pixels.GetLongLength(0); i++) {
+            for (var j = 0L; j < Pixels.GetLongLength(1); j++) {
+                Pixels[i,j] = new Pixel(isUsingColourPalette ? 3 : samples);
+            }
+        }
+
+        return Pixels;
+    }
+
+    private static void convertTiffMetadataToMediaMetadata(IImage img, TiffMetadata metadata) {
+        foreach (var meta in metadata) {
+            var id = meta.TagId;
+            var tag = (Enum.IsDefined(typeof(ExifTag), id)) ? (ExifTag?)id : null;
+            var name = tag?.ToStringWithSpaces() ?? string.Empty;
+            img.Metadata.AddField(meta.DataType switch {
+                /*
+                Byte = 1,           // 8 bit unsigned int
+                ASCII = 2,          // 8 bit ascii code
+                Short = 3,          // 16 bit unsigned int
+                Long = 4,           // 32 bit unsigned int
+                Rational = 5,       // 2 Longs; first is numerator, second denominator
+                SignedByte = 6,     // 8 bit signed int
+                Undefined = 7,      // Any binary data
+                SignedShort = 8,    // 16 bit signed int
+                SignedLong = 9,     // 32 bit signed int
+                SignedRational = 10,// 2 signed Longs; first is numerator, second denominator
+                Float = 11,         // 32 bit IEEE floating point number
+                Double = 12         // 64 bit IEEE floating point number
+                */
+                TiffFieldType.Byte              => meta.Values.Length > 1 ? new Field<byte[]>(name, tag, meta.Values.Select(x => Convert.ToByte(x)).ToArray()) : new Field<byte>(name, tag, Convert.ToByte(meta.Values[0])),
+                TiffFieldType.ASCII             => new Field<string>(name, tag, System.Text.Encoding.UTF8.GetString(meta.Values.Select(x => Convert.ToByte(x)).ToArray())),
+                TiffFieldType.Short             => meta.Values.Length > 1 ? new Field<ushort[]>(name, tag, meta.Values.Select(x => Convert.ToUInt16(x)).ToArray()) : new Field<ushort>(name, tag, Convert.ToUInt16(meta.Values[0])),
+                TiffFieldType.Long              => meta.Values.Length > 1 ? new Field<uint[]>(name, tag, meta.Values.Select(x => Convert.ToUInt32(x)).ToArray()) : new Field<uint>(name, tag, Convert.ToUInt32(meta.Values[0])),
+                TiffFieldType.Rational          => meta.Values.Length > 1 ? new Field<UnsignedRational[]>(name, tag, meta.Values.Select(x => (UnsignedRational)x).ToArray()) : new Field<UnsignedRational>(name, tag, (UnsignedRational)meta.Values[0]),
+                TiffFieldType.SignedByte        => meta.Values.Length > 1 ? new Field<sbyte[]>(name, tag, meta.Values.Select(x => Convert.ToSByte(x)).ToArray()) : new Field<sbyte>(name, tag, Convert.ToSByte(meta.Values[0])),
+                TiffFieldType.SignedShort       => meta.Values.Length > 1 ? new Field<short[]>(name, tag, meta.Values.Select(x => Convert.ToInt16(x)).ToArray()) : new Field<short>(name, tag, Convert.ToInt16(meta.Values[0])),
+                TiffFieldType.SignedLong        => meta.Values.Length > 1 ? new Field<int[]>(name, tag, meta.Values.Select(x => Convert.ToInt32(x)).ToArray()) : new Field<int>(name, tag, Convert.ToInt32(meta.Values[0])),
+                TiffFieldType.SignedRational    => meta.Values.Length > 1 ? new Field<SignedRational[]>(name, tag, meta.Values.Select(x => (SignedRational)x).ToArray()) : new Field<SignedRational>(name, tag, (SignedRational)meta.Values[0]),
+                TiffFieldType.Float             => meta.Values.Length > 1 ? new Field<float[]>(name, tag, meta.Values.Select(x => Convert.ToSingle(x)).ToArray()) : new Field<float>(name, tag, Convert.ToSingle(meta.Values[0])),
+                TiffFieldType.Double            => meta.Values.Length > 1 ? new Field<double[]>(name, tag, meta.Values.Select(x => Convert.ToDouble(x)).ToArray()) : new Field<double>(name, tag, Convert.ToDouble(meta.Values[0])),
+                TiffFieldType.Undefined         => new Field(name, tag),
+                _                               => new Field(name, tag)
+            });
+        }
+    }
 
     public void Save(string path, IImage image) {
         if (!path.EndsWith(".tif") && !path.EndsWith(".tiff"))
@@ -362,7 +469,7 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                     ValueOffset = image.Width,
                 });
                 fields.Add(new TiffField{  
-                    TagId = (uint)ExifTag.ImageLength,
+                    TagId = (uint)ExifTag.ImageHeight,
                     DataType = TiffFieldType.Short,
                     Length = 1,
                     ValueOffset = image.Height,
@@ -386,13 +493,13 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                     ValueOffset = 1, // No absolute unit of measurement
                 });
                 fields.Add(new TiffField{  
-                    TagId = (uint)ExifTag.ResolutionX,
+                    TagId = (uint)ExifTag.XResolution,
                     DataType = TiffFieldType.Short,
                     Length = 1,
                     ValueOffset = 1, // 1 pixel per unit
                 });
                 fields.Add(new TiffField{  
-                    TagId = (uint)ExifTag.ResolutionY,
+                    TagId = (uint)ExifTag.YResolution,
                     DataType = TiffFieldType.Short,
                     Length = 1,
                     ValueOffset = 1, // 1 pixel per unit
@@ -549,7 +656,15 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
     }
 }
 
-public class TiffMetadata : IEnumerable<TiffField> {
+internal class TiffField {
+    public uint TagId {get; set;}
+    public TiffFieldType DataType {get; set;}
+    public uint Length {get; set;}
+    public long ValueOffset {get; set;}
+    public object[] Values {get; set;} = new object[0];
+}
+
+internal class TiffMetadata : IEnumerable<TiffField> {
     private Dictionary<uint, TiffField> _metadata = new Dictionary<uint, TiffField>();
     
     public void Add(TiffField field) {
@@ -592,70 +707,4 @@ public enum TiffImageType {
     BlackIsZero = 1, // Greyscale, black is 0 and white is not-zero
     RgbFullColour = 2, // Each pixel is of 3 components (BITS PER SAMPLE is a triplet for each colour)
     PaletteColour = 3, // Each pixel is a reference to a colour in the map (BITS PER SAMPLE is a single value)
-}
-
-public class TiffImage : IImage {
-    public class TiffField {
-        public uint TagId {get; set;}
-        public ExifTag TagName => Enum.IsDefined(typeof(ExifTag), TagId) ? (ExifTag)TagId : ExifTag.Unknown;
-        public TiffFieldType DataType {get; set;}
-        public uint Length {get; set;}
-        public long ValueOffset {get; set;}
-        public object[] Values {get; set;} = new object[0];
-
-        public override string ToString() {
-            string data;
-            if (DataType == TiffFieldType.ASCII) {
-                data = System.Text.Encoding.ASCII.GetString(this.Values.Select(x => Convert.ToByte(x)).ToArray());
-            } else {
-                data = string.Join(", ", this.Values.Select(x => x.ToString()));
-            }   
-            return ($"{this.TagName}({this.TagId}) = {this.DataType}({this.Length}) [{data}]");
-        }
-    }
-
-    public TiffCompression CompressionType {
-        get {
-            var tag = ExifTag.Compression;
-            if (!Metadata.Contains(tag))
-                return TiffCompression.NoCompression;
-            
-            var field = Metadata[tag];
-            if (field.Values == null || field.Values.Length < 1) {
-                return TiffCompression.NoCompression;
-            }
-
-            var ivalue = (int)Convert.ToInt32(field.Values[0]);
-            if (Enum.IsDefined(typeof(TiffCompression), ivalue)) {
-                return (TiffCompression)ivalue;
-            } else {
-                return TiffCompression.NoCompression;
-            }
-        }
-    }
-    public TiffImageType Type {
-        get {
-            var tag = ExifTag.PhotometricInterpretation;
-            if (!Metadata.Contains(tag))
-                return TiffImageType.WhiteIsZero;
-            
-            var field = Metadata[tag];
-            if (field.Values == null || field.Values.Length < 1) {
-                return TiffImageType.WhiteIsZero;
-            }
-
-            var ivalue = (int)Convert.ToInt32(field.Values[0]);
-            if (Enum.IsDefined(typeof(TiffImageType), ivalue)) {
-                return (TiffImageType)ivalue;
-            } else {
-                return TiffImageType.WhiteIsZero;
-            }
-        }
-    }
-    public TiffMetadata Metadata {get; private set;} = new TiffMetadata();
-
-    public int Width => Convert.ToInt32(Metadata[ExifTag.ImageWidth].Values[0]);
-    public int Height => Convert.ToInt32(Metadata[ExifTag.ImageLength].Values[0]);
-    public Pixel[,]? Pixels {get; internal set;}
-    public SampleDepth SampleBitDepth {get; internal set;}
 }

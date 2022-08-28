@@ -15,7 +15,7 @@
     <RepositoryUrl>https://github.com/qkmaxware/CsMedia.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageDescription>
-      Media is a library containing exporters for various media types (image, video, audio)
+      Media is a library containing importers and exporters for various media types (image, video, audio)
     </PackageDescription>
   </PropertyGroup>
   <ItemGroup>
