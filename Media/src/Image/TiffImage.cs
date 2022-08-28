@@ -448,6 +448,14 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
         }
         var headerEndPtr = 8;
 
+        // Copy all user defined metadata
+        TiffMetadata metadata = new TiffMetadata();
+        foreach (var field in image.Metadata) {
+            // Handle encoding of metadata
+            convertMediaMetadataToTiffMetadata(metadata, field);
+        }
+
+        // Create primary IFD
         using (MemoryStream IFD = new MemoryStream()) {
             var IFDWriter = new BinaryWriter(IFD);
 
@@ -506,7 +514,6 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                 });
                 {
                     // Samples
-                    
                     fields.Add(new TiffField{  
                         TagId = (uint)ExifTag.SamplesPerPixel,
                         DataType = TiffFieldType.Short,
@@ -564,14 +571,14 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
                 }
 
                 // Write IFD
-                IFDWriter.Write((ushort)fields.Count); // Number of IFD entries
-                foreach (var field in fields) {
+                metadata.Add(fields);
+                IFDWriter.Write((ushort)metadata.Count); // Number of IFD entries
+                foreach (var field in metadata) {
                     IFDWriter.Write((ushort)field.TagId);
                     IFDWriter.Write((ushort)field.DataType);
                     IFDWriter.Write((uint)field.Length);
                     valueFieldOffsets.Add(IFD.Position); // record the position of this IDF's value Offset field so we can update it later
                     IFDWriter.Write((uint)field.ValueOffset); 
-                    // TODO write the value arrays (need to come back here to record the value offset as a pointer to the data)
                 }
                 IFDWriter.Write((uint)0); // No next IFD
             }
@@ -654,6 +661,97 @@ public class TagImageFileFormat : IBinaryImageLoader, IBinaryImageEncoder {
             }
         }
     }
+
+    private void convertMediaMetadataToTiffMetadata(TiffMetadata metadata, Field field) {
+        // Can't encode fields without an EXIF tag
+        if (!field.ExifTag.HasValue)
+            return; 
+
+        var tiff = new TiffField {
+            TagId = (uint)field.ExifTag.Value,
+            DataType = field switch {
+                Field<byte> byteField                   => TiffFieldType.Byte,           
+                Field<string> stringField               => TiffFieldType.ASCII,          
+                Field<ushort> ushortField               => TiffFieldType.Short,          
+                Field<uint> uintField                   => TiffFieldType.Long,           
+                Field<UnsignedRational> urationalField  => TiffFieldType.Rational,       
+                Field<sbyte> sbyteField                 => TiffFieldType.SignedByte,     
+                Field<short> shortField                 => TiffFieldType.SignedShort,    
+                Field<int> intField                     => TiffFieldType.SignedLong,     
+                Field<SignedRational> srationalField    => TiffFieldType.SignedRational, 
+                Field<float> floatField                 => TiffFieldType.Float,          
+                Field<double> doubleField               => TiffFieldType.Double,     
+
+                Field<byte[]> byteField                 => TiffFieldType.Byte,           
+                Field<ushort[]> ushortField             => TiffFieldType.Short,          
+                Field<uint[]> uintField                 => TiffFieldType.Long,           
+                Field<UnsignedRational[]> urationalField=> TiffFieldType.Rational,       
+                Field<sbyte[]> sbyteField               => TiffFieldType.SignedByte,     
+                Field<short[]> shortField               => TiffFieldType.SignedShort,    
+                Field<int[]> intField                   => TiffFieldType.SignedLong,     
+                Field<SignedRational[]> srationalField  => TiffFieldType.SignedRational, 
+                Field<float[]> floatField               => TiffFieldType.Float,          
+                Field<double[]> doubleField             => TiffFieldType.Double,   
+                _                                       => TiffFieldType.Undefined,      
+            },
+            Length = field switch {
+                Field<byte> byteField                   => 1,
+                Field<string> stringField               => (uint?)stringField.Value?.Length ?? 0u,
+                Field<ushort> ushortField               => 1,
+                Field<uint> uintField                   => 1,
+                Field<UnsignedRational> urationalField  => 1,
+                Field<sbyte> sbyteField                 => 1,
+                Field<short> shortField                 => 1,
+                Field<int> intField                     => 1,
+                Field<SignedRational> srationalField    => 1,
+                Field<float> floatField                 => 1,
+                Field<double> doubleField               => 1,
+
+                Field<byte[]> byteField                 => (uint?)byteField.Value?.Length ?? 0u,
+                Field<ushort[]> ushortField             => (uint?)ushortField.Value?.Length ?? 0u,
+                Field<uint[]> uintField                 => (uint?)uintField.Value?.Length ?? 0u,
+                Field<UnsignedRational[]> urationalField=> (uint?)urationalField.Value?.Length ?? 0u,
+                Field<sbyte[]> sbyteField               => (uint?)sbyteField.Value?.Length ?? 0u,
+                Field<short[]> shortField               => (uint?)shortField.Value?.Length ?? 0u,
+                Field<int[]> intField                   => (uint?)intField.Value?.Length ?? 0u,
+                Field<SignedRational[]> srationalField  => (uint?)srationalField.Value?.Length ?? 0u,
+                Field<float[]> floatField               => (uint?)floatField.Value?.Length ?? 0u,
+                Field<double[]> doubleField             => (uint?)doubleField.Value?.Length ?? 0u,
+                _                                       => 0,      
+            },
+            Values = field switch {
+                Field<string> stringField               => System.Text.Encoding.UTF8.GetBytes(stringField.Value ?? string.Empty).Select(x => (object)x).ToArray(),
+
+                Field<byte[]> byteField                 => byteField.Value.Select(x => (object)x).ToArray(),
+                Field<ushort[]> ushortField             => ushortField.Value.Select(x => (object)x).ToArray(),
+                Field<uint[]> uintField                 => uintField.Value.Select(x => (object)x).ToArray(),
+                Field<UnsignedRational[]> urationalField=> urationalField.Value,
+                Field<sbyte[]> sbyteField               => sbyteField.Value.Select(x => (object)x).ToArray(),
+                Field<short[]> shortField               => shortField.Value.Select(x => (object)x).ToArray(),
+                Field<int[]> intField                   => intField.Value.Select(x => (object)x).ToArray(),
+                Field<SignedRational[]> srationalField  => srationalField.Value,
+                Field<float[]> floatField               => floatField.Value.Select(x => (object)x).ToArray(),
+                Field<double[]> doubleField             => doubleField.Value.Select(x => (object)x).ToArray(),
+                _                                       => null,      
+            } ?? new object[0],
+            ValueOffset = field switch {
+                Field<byte> byteField                   => byteField.Value,
+                Field<string> stringField               => 0,
+                Field<ushort> ushortField               => ushortField.Value,
+                Field<uint> uintField                   => uintField.Value,
+                Field<UnsignedRational> urationalField  => 0,
+                Field<sbyte> sbyteField                 => sbyteField.Value,
+                Field<short> shortField                 => shortField.Value,
+                Field<int> intField                     => intField.Value,
+                Field<SignedRational> srationalField    => 0,
+                Field<float> floatField                 => BitConverter.ToInt64(BitConverter.GetBytes(floatField.Value)),
+                Field<double> doubleField               => BitConverter.ToInt64(BitConverter.GetBytes(doubleField.Value)),
+                _                                       => 0,      
+            }
+        };
+        if (tiff.DataType != TiffFieldType.Undefined)
+            metadata.Add(tiff);
+    }
 }
 
 internal class TiffField {
@@ -667,8 +765,15 @@ internal class TiffField {
 internal class TiffMetadata : IEnumerable<TiffField> {
     private Dictionary<uint, TiffField> _metadata = new Dictionary<uint, TiffField>();
     
+    public int Count => _metadata.Count;
+
     public void Add(TiffField field) {
         _metadata[field.TagId] = field;
+    }
+
+    public void Add(IEnumerable<TiffField> fields) {
+        foreach (var field in fields)
+            Add(field);
     }
 
     public bool Contains(ExifTag tag) {

@@ -37,6 +37,7 @@ public class TiffTest {
             System.Console.WriteLine(field);
         }
 
+        // Test reading metadata
         var width = image.Metadata.FindField<UInt16>(ExifTag.ImageWidth);
         var height = image.Metadata.FindField<UInt16>(ExifTag.ImageHeight);
         Assert.AreEqual(64, width.Value);
@@ -44,6 +45,10 @@ public class TiffTest {
 
         var layer = image.Metadata.FindField<string>(ExifTag.PageName);
         Assert.AreEqual("Background\0", layer.Value);
+
+        // Test adding metadata
+        image.Metadata.AddField(new Field<string>(ExifTag.Software, ".Net6"));
+        format.Save(Path.Join(testPathRoot, "processed", filename + ".tagged.tif"), image);
     }
 
 }
